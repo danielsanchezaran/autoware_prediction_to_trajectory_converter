@@ -19,10 +19,19 @@
 #include <autoware/universe_utils/geometry/geometry.hpp>
 
 #include <iostream>
+#include <random>
 #include <vector>
 
 namespace autoware::prediction_to_trajectory_converter
 {
+
+std::array<uint8_t, 16> generate_random_id()
+{
+  static std::independent_bits_engine<std::mt19937, 8, uint8_t> engine(std::random_device{}());
+  std::array<uint8_t, 16> id;
+  std::generate(id.begin(), id.end(), std::ref(engine));
+  return id;
+}
 
 PredictionToTrajectory::PredictionToTrajectory(const rclcpp::NodeOptions & options)
 : ConverterBase("prediction_to_trajectory_converter", options)
@@ -46,7 +55,9 @@ PredictionToTrajectory::PredictionToTrajectory(const rclcpp::NodeOptions & optio
   pub_qos_profile.keep_last(10);  // Configure depth as needed
 
   // Override the publisher with the new QoS profile
-  pub_ = this->create_publisher<Trajectory>(output_topic, pub_qos_profile);
+  pub_ = this->create_publisher<Trajectories>(output_topic, pub_qos_profile);
+
+  generator_uuid_ = autoware::universe_utils::generateUUID();
 }
 
 void PredictionToTrajectory::process([[maybe_unused]] const PredictedObjects::ConstSharedPtr msg)
@@ -57,11 +68,15 @@ void PredictionToTrajectory::process([[maybe_unused]] const PredictedObjects::Co
   }
   const auto & header = msg->header;
   const auto & ego_object = msg->objects[0];
-  Trajectory trajectory;
-  trajectory.header = header;
-  auto max_distance = 0.0;
+
+  auto now = this->now();
+
+  Trajectories trajectories;
   for (const auto & predicted_path : ego_object.kinematics.predicted_paths) {
+    Trajectory trajectory;
+    trajectory.header = header;
     std::vector<TrajectoryPoint> trajectory_points;
+
     for (const auto & point : predicted_path.path) {
       TrajectoryPoint trajectory_point;
       trajectory_point.pose = point;
@@ -70,16 +85,13 @@ void PredictionToTrajectory::process([[maybe_unused]] const PredictedObjects::Co
       trajectory_point.acceleration_mps2 = 0.0;
       trajectory_points.push_back(trajectory_point);
     }
-    const auto distance = autoware::motion_utils::calcSignedArcLength(
-      trajectory_points, 0, trajectory_points.size() - 1);
-    if (distance > max_distance) {
-      max_distance = distance;
-      trajectory.points = trajectory_points;
-    }
+    trajectory.header.stamp = now;
+    trajectory.points = trajectory_points;
+    trajectory.score = 1.0f / static_cast<float>(ego_object.kinematics.predicted_paths.size());
+    trajectories.trajectories.push_back(trajectory);
   }
-  trajectory.header = header;
-  trajectory.header.stamp = this->now();
-  pub_->publish(trajectory);
+
+  pub_->publish(trajectories);
 }
 }  // namespace autoware::prediction_to_trajectory_converter
 

@@ -89,6 +89,11 @@ void PredictionToTrajectory::process([[maybe_unused]] const PredictedObjects::Co
     trajectory.points = trajectory_points;
     trajectory.score = 1.0f / static_cast<float>(ego_object.kinematics.predicted_paths.size());
     trajectories.trajectories.push_back(trajectory);
+
+    TrajectoryGeneratorInfo generator_info;
+    generator_info.generator_id = generator_uuid_;
+    generator_info.generator_name.set__data("mtr");
+    trajectories.generator_info.push_back(generator_info);
   }
 
   pub_->publish(trajectories);
